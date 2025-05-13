@@ -2,6 +2,7 @@ import pygame
 import sys
 import math
 import random
+import bisect
 
 # Reduced window size for better Mac performance
 WIDTH, HEIGHT = 540, 960
@@ -14,7 +15,7 @@ def rgb(r, g, b): return (r, g, b)
 BLACK = rgb(0, 0, 0)
 RED   = rgb(255, 50, 50)
 WHITE = rgb(255, 255, 255)
-BLUE = rgb(80, 120, 255)
+GREEN = rgb(0,255,0)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -25,6 +26,9 @@ font = pygame.font.SysFont('Arial', 48)
 # Scores
 score_red = 0
 score_blue = 0
+
+
+passed_indices = []
 
 class Ball:
     def __init__(self, x, y, radius, speed=6):
@@ -176,71 +180,73 @@ while frame < TOTAL_FRAMES:
     passed_ring_index = -1  # Index of the passed ring
 
     for i, ring in visible_rings:
-        # Update the rotation angle
-        ring['start'] += delta
-        ring['end'] += delta
+            # Update the rotation angle
+            ring['start'] += delta
+            ring['end'] += delta
 
-        # Calculate actual radius with offset
-        actual_radius = ring['original_radius'] - ring['offset']
+            # Calculate actual radius with offset
+            actual_radius = ring['original_radius'] - ring['offset']
 
-        # Draw ring using the actual radius
-        rect = pygame.Rect(
-            ring_center.x - actual_radius,
-            ring_center.y - actual_radius,
-            actual_radius * 2,
-            actual_radius * 2
-        )
-        pygame.draw.arc(screen, WHITE, rect, ring['start'], ring['end'], 4)
+            # Draw ring using the actual radius
+            rect = pygame.Rect(
+                ring_center.x - actual_radius,
+                ring_center.y - actual_radius,
+                actual_radius * 2,
+                actual_radius * 2
+            )
+            pygame.draw.arc(screen, WHITE, rect, ring['start'], ring['end'], 4)
 
-        # Collision test for red ball
-        ring_for_collision = ring.copy()
-        ring_for_collision['radius'] = actual_radius
-        result = ball.try_bounce_or_pass(ring_center, ring_for_collision)
-        if result == 'pass':
-            ring['active'] = False
-            score_red += 1
-            rings_passed = True
-            passed_ring_index = i
-            # Add shockwave effect for red ball
-            shockwaves.append({
-                'center': ring_center.copy(),
-                'radius': actual_radius,
-                'max_radius': actual_radius + 300,
-                'alpha': 255,
-                'color': RED
-            })
+            # Collision test for red ball
+            ring_for_collision = ring.copy()
+            ring_for_collision['radius'] = actual_radius
+            result = ball.try_bounce_or_pass(ring_center, ring_for_collision)
+            if result == 'pass':
+                ring['active'] = False
+                score_red += 1
+                rings_passed = True
+                # Add to passed_indices (sorted)
+                idx = ring['initial_index']
+                if idx not in passed_indices:  # Prevent duplicates
+                    bisect.insort(passed_indices, idx)
+                # Add shockwave effect for red ball
+                shockwaves.append({
+                    'center': ring_center.copy(),
+                    'radius': actual_radius,
+                    'max_radius': actual_radius + 300,
+                    'alpha': 255,
+                    'color': RED
+                })
 
-        # Collision test for blue ball
-        ring_for_collision2 = ring.copy()
-        ring_for_collision2['radius'] = actual_radius
-        result2 = ball2.try_bounce_or_pass(ring_center, ring_for_collision2)
-        if result2 == 'pass':
-            ring['active'] = False
-            score_blue += 1
-            rings_passed = True
-            passed_ring_index = i
-            # Add shockwave effect for blue ball
-            shockwaves.append({
-                'center': ring_center.copy(),
-                'radius': actual_radius,
-                'max_radius': actual_radius + 300,
-                'alpha': 255,
-                'color': BLUE
-            })
+            # Collision test for blue ball
+            ring_for_collision2 = ring.copy()
+            ring_for_collision2['radius'] = actual_radius
+            result2 = ball2.try_bounce_or_pass(ring_center, ring_for_collision2)
+            if result2 == 'pass':
+                ring['active'] = False
+                score_blue += 1
+                rings_passed = True
+                # Add to passed_indices (sorted)
+                idx = ring['initial_index']
+                if idx not in passed_indices:  # Prevent duplicates
+                    bisect.insort(passed_indices, idx)
+                # Add shockwave effect for blue ball
+                shockwaves.append({
+                    'center': ring_center.copy(),
+                    'radius': actual_radius,
+                    'max_radius': actual_radius + 300,
+                    'alpha': 255,
+                    'color': GREEN
+                })
 
-    # If a ring was passed, adjust the target offsets for all active rings
-    if rings_passed and passed_ring_index >= 0:
-        # Get the radius step amount we need to shrink by
-        shrink_amount = radius_step
-        
-        # Set target offsets for all rings with larger indices
+    # Update target offsets for all rings based on passed_indices
+    if rings_passed:
         for r in rings:
-            if r['active'] and r['initial_index'] > passed_ring_index:
-                r['target_offset'] += shrink_amount
-        
+            if r['active']:
+                # Number of passed rings with index < current ring's index
+                count_passed_before = bisect.bisect_left(passed_indices, r['initial_index'])
+                r['target_offset'] = count_passed_before * radius_step
         # Start shrinking animation
         shrink_timer = 60  # 1 second at 60 FPS
-
     # Update ball physics
     ball.update()
     ball2.update()
@@ -281,7 +287,7 @@ while frame < TOTAL_FRAMES:
 
     # Draw both balls
     ball.draw(screen, RED)
-    ball2.draw(screen, BLUE)
+    ball2.draw(screen, GREEN)
 
     # --- UI Overlay: Title, Score Table, Clock ---
     # Fonts
@@ -304,8 +310,8 @@ while frame < TOTAL_FRAMES:
     box_padding = 12
     box_gap = 30
     box_y = title_bg_rect.bottom + 8
-    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 12)
-    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 12)
+    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 8)
+    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 8)
     pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=8)
     pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=8)
     pygame.draw.rect(screen, (0,255,0), yes_bg_rect, 2, border_radius=8)
