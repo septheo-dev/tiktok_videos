@@ -90,7 +90,7 @@ class Ball:
                 v_normal = n * v_dot_n
                 v_tangent = self.vel - v_normal
                 # Clean reflection: invert normal, keep tangent, apply slight damping
-                restitution = 0.9  # 1.0 = perfectly elastic, <1.0 = some energy loss
+                restitution = 1  # 1.0 = perfectly elastic, <1.0 = some energy loss
                 self.vel = (-v_normal * restitution) + v_tangent
                 # Move the ball just outside the ring to avoid sticking
                 overlap = (dist + self.radius) - ring['radius']
@@ -115,7 +115,7 @@ spiral_step = math.radians(5)
 
 # Shrinking animation parameters
 shrink_timer = 0    # Timer to track shrinking animation
-shrink_speed = 0.07 # Lower value for smooth shrink animation
+shrink_speed = 0.08 # Lower value for smooth shrink animation
 
 # Shockwave effect parameters
 shockwaves = []  # List of active shockwaves
@@ -283,11 +283,45 @@ while frame < TOTAL_FRAMES:
     ball.draw(screen, RED)
     ball2.draw(screen, BLUE)
 
-    # Draw scores
-    score_red_surf = font.render(f"{score_red}", True, RED)
-    score_blue_surf = font.render(f"{score_blue}", True, BLUE)
-    screen.blit(score_red_surf, (40, 20))
-    screen.blit(score_blue_surf, (WIDTH - 40 - score_blue_surf.get_width(), 20))
+    # --- UI Overlay: Title, Score Table, Clock ---
+    # Fonts
+    title_font = pygame.font.SysFont('Arial', 32, bold=True)
+    score_font = pygame.font.SysFont('Arial', 24, bold=True)
+    clock_font = pygame.font.SysFont('Arial', 26, bold=True)
+
+    # Title
+    title_text = "Will your crush love you ?"
+    title_surf = title_font.render(title_text, True, (0,0,0))
+    title_bg_rect = pygame.Rect(WIDTH//2 - title_surf.get_width()//2 - 12, 16, title_surf.get_width() + 24, title_surf.get_height() + 8)
+    pygame.draw.rect(screen, (255,255,255), title_bg_rect, border_radius=8)
+    screen.blit(title_surf, (title_bg_rect.x + 12, title_bg_rect.y + 4))
+
+    # Score Table - two independent boxes
+    yes_text = f"Yes : {score_red}"
+    no_text = f"No : {score_blue}"
+    yes_surf = score_font.render(yes_text, True, (0,255,0))
+    no_surf = score_font.render(no_text, True, (255,60,60))
+    box_padding = 12
+    box_gap = 30
+    box_y = title_bg_rect.bottom + 8
+    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 12)
+    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 12)
+    pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=8)
+    pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=8)
+    pygame.draw.rect(screen, (0,255,0), yes_bg_rect, 2, border_radius=8)
+    pygame.draw.rect(screen, (255,60,60), no_bg_rect, 2, border_radius=8)
+    screen.blit(yes_surf, (yes_bg_rect.x + box_padding, yes_bg_rect.y + 6))
+    screen.blit(no_surf, (no_bg_rect.x + box_padding, no_bg_rect.y + 6))
+
+    # Clock (bottom center, lifted higher)
+    seconds_left = max(0, (TOTAL_FRAMES - frame)//FPS)
+    mins = seconds_left // 60
+    secs = seconds_left % 60
+    clock_str = f"{mins:02}:{secs:02}"
+    clock_surf = clock_font.render(clock_str, True, (0,0,0))
+    clock_bg_rect = pygame.Rect(WIDTH//2 - clock_surf.get_width()//2 - 14, HEIGHT - clock_surf.get_height() - 80, clock_surf.get_width() + 28, clock_surf.get_height() + 12)
+    pygame.draw.rect(screen, (255,255,255), clock_bg_rect, border_radius=7)
+    screen.blit(clock_surf, (clock_bg_rect.x + 14, clock_bg_rect.y + 6))
 
     pygame.display.flip()
     clock.tick(FPS)
