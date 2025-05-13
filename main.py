@@ -5,17 +5,19 @@ import random
 import bisect
 
 # 1080x1920 vertical for high quality export
-WIDTH, HEIGHT = 1080, 1920
+WIDTH, HEIGHT = 540, 960
 FPS = 60
 GRAVITY = 0.3
 TOTAL_FRAMES = 3660  # ~61 seconds at 60 fps
 
-# --- Optional: Export frames for video ---
+# --- Optimized: Export frames for video ---
 import os
-EXPORT_FRAMES = True  # Set to True to export video frames
-EXPORT_DIR = 'export_frames'
-if EXPORT_FRAMES and not os.path.exists(EXPORT_DIR):
-    os.makedirs(EXPORT_DIR)
+import tempfile
+import subprocess
+
+RECORDING = True  # Set to True to export video frames
+TEMP_FRAMES_DIR = tempfile.mkdtemp(prefix='game_frames_')
+FRAME_PREFIX = os.path.join(TEMP_FRAMES_DIR, 'frame_')
 
 # Colors
 def rgb(r, g, b): return (r, g, b)
@@ -339,8 +341,8 @@ while frame < TOTAL_FRAMES:
     screen.blit(clock_surf, (clock_bg_rect.x + 14, clock_bg_rect.y + 6))
 
     # --- Export frame as PNG if enabled ---
-    if EXPORT_FRAMES:
-        pygame.image.save(screen, os.path.join(EXPORT_DIR, f"frame_{frame:05d}.png"))
+    if RECORDING:
+        pygame.image.save(screen, f"{FRAME_PREFIX}{frame:05d}.png")
         # Print a progress bar in the terminal every 60 frames
         if frame % 60 == 0 or frame == TOTAL_FRAMES - 1:
             percent = int(100 * frame / TOTAL_FRAMES)
@@ -352,3 +354,29 @@ while frame < TOTAL_FRAMES:
     frame += 1
 
 pygame.quit()
+
+# --- Compress frames to video and clean up ---
+def compress_frames_to_video():
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-y',  # overwrite without asking
+        '-framerate', str(FPS),
+        '-i', f"{FRAME_PREFIX}%05d.png",
+        '-vf', "scale=1080:1920:force_original_aspect_ratio=1,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+        '-c:v', 'libx265',  # HEVC codec for better compression
+        '-crf', '28',  # Quality level (18-28 is good, lower=better quality)
+        '-preset', 'fast',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        'game_recording_compressed.mp4'
+    ]
+    print("\n[FFmpeg] Compressing frames into video... (this may take a minute)")
+    subprocess.run(ffmpeg_cmd)
+    # Clean up temporary frames
+    for f in os.listdir(TEMP_FRAMES_DIR):
+        os.remove(os.path.join(TEMP_FRAMES_DIR, f))
+    os.rmdir(TEMP_FRAMES_DIR)
+    print("[FFmpeg] Done! Output: game_recording_compressed.mp4")
+
+if RECORDING:
+    compress_frames_to_video()
