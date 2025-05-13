@@ -4,11 +4,18 @@ import math
 import random
 import bisect
 
-# Reduced window size for better Mac performance
-WIDTH, HEIGHT = 540, 960
+# 1080x1920 vertical for high quality export
+WIDTH, HEIGHT = 1080, 1920
 FPS = 60
 GRAVITY = 0.3
 TOTAL_FRAMES = 3660  # ~61 seconds at 60 fps
+
+# --- Optional: Export frames for video ---
+import os
+EXPORT_FRAMES = True  # Set to True to export video frames
+EXPORT_DIR = 'export_frames'
+if EXPORT_FRAMES and not os.path.exists(EXPORT_DIR):
+    os.makedirs(EXPORT_DIR)
 
 # Colors
 def rgb(r, g, b): return (r, g, b)
@@ -18,6 +25,8 @@ WHITE = rgb(255, 255, 255)
 GREEN = rgb(0,255,0)
 
 pygame.init()
+# Hide window for fast export (headless mode)
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
 # Font for score
@@ -329,8 +338,17 @@ while frame < TOTAL_FRAMES:
     pygame.draw.rect(screen, (255,255,255), clock_bg_rect, border_radius=7)
     screen.blit(clock_surf, (clock_bg_rect.x + 14, clock_bg_rect.y + 6))
 
-    pygame.display.flip()
-    clock.tick(FPS)
+    # --- Export frame as PNG if enabled ---
+    if EXPORT_FRAMES:
+        pygame.image.save(screen, os.path.join(EXPORT_DIR, f"frame_{frame:05d}.png"))
+        # Print a progress bar in the terminal every 60 frames
+        if frame % 60 == 0 or frame == TOTAL_FRAMES - 1:
+            percent = int(100 * frame / TOTAL_FRAMES)
+            bar_len = 40
+            filled_len = int(bar_len * percent // 100)
+            bar = '=' * filled_len + '-' * (bar_len - filled_len)
+            print(f"\r[Export] |{bar}| {percent}% ({frame}/{TOTAL_FRAMES})", end='', flush=True)
+    # Skip display.flip() and clock.tick(FPS) for speed
     frame += 1
 
 pygame.quit()
