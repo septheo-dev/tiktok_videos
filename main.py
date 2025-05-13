@@ -89,18 +89,10 @@ class Ball:
                 v_dot_n = self.vel.dot(n)
                 v_normal = n * v_dot_n
                 v_tangent = self.vel - v_normal
-                # Reflect normal, strongly dampen tangent
-                self.vel = -v_normal + v_tangent * 0.05
-                # Si la vitesse devient trop faible, on remet une vitesse normale modérée ET on ajoute un petit kick tangent
-                if self.vel.length() < 1.8:
-                    self.vel = n * 2.8
-                    tangent = pygame.Vector2(-n.y, n.x)
-                    self.vel += tangent * (random.uniform(-1, 1) * 0.7)  # kick tangent pour éviter tout blocage
-                # Si la composante tangentielle est trop faible, on ajoute un kick horizontal pour éviter les rebonds verticaux à l'infini
-                tangent = pygame.Vector2(-n.y, n.x)
-                tangential_speed = self.vel.dot(tangent)
-                if abs(tangential_speed) < 0.5:
-                    self.vel += tangent * (random.choice([-1, 1]) * 1.2)
+                # Clean reflection: invert normal, keep tangent, apply slight damping
+                restitution = 0.9  # 1.0 = perfectly elastic, <1.0 = some energy loss
+                self.vel = (-v_normal * restitution) + v_tangent
+                # Move the ball just outside the ring to avoid sticking
                 overlap = (dist + self.radius) - ring['radius']
                 self.pos -= n * overlap
                 return 'bounce'
@@ -125,8 +117,8 @@ spiral_step = math.radians(5)
 shrink_timer = 0    # Timer to track shrinking animation
 shrink_speed = 0.07 # Lower value for smooth shrink animation
 
-# Shockwave effect state: list of dicts with keys: 'color', 'pos', 'radius', 'max_radius', 'alpha'
-shockwaves = []
+# Shockwave effect parameters
+shockwaves = []  # List of active shockwaves
 
 for i in range(NUM_TOTAL_RINGS):
     # Stocke uniquement l'angle de départ (le rayon sera recalculé dynamiquement)
@@ -152,17 +144,6 @@ while frame < TOTAL_FRAMES:
             sys.exit()
 
     screen.fill(BLACK)
-
-    # --- Draw and update shockwaves ---
-    for wave in shockwaves[:]:
-        wave['radius'] += 13
-        wave['alpha'] = max(0, wave['alpha'] - 10)
-        if wave['radius'] > wave['max_radius'] or wave['alpha'] <= 0:
-            shockwaves.remove(wave)
-            continue
-        surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        pygame.draw.circle(surf, wave['color'] + (wave['alpha'],), (int(wave['pos'].x), int(wave['pos'].y)), int(wave['radius']), width=10)
-        screen.blit(surf, (0, 0))
 
     # Process ring shrinking animation
     if shrink_timer > 0:
@@ -220,13 +201,13 @@ while frame < TOTAL_FRAMES:
             score_red += 1
             rings_passed = True
             passed_ring_index = i
-            # Add red shockwave
+            # Add shockwave effect for red ball
             shockwaves.append({
-                'color': RED,
-                'pos': ball.pos.copy(),
-                'radius': 0,
-                'max_radius': 260,
-                'alpha': 180
+                'center': ring_center.copy(),
+                'radius': actual_radius,
+                'max_radius': actual_radius + 300,
+                'alpha': 255,
+                'color': RED
             })
 
         # Collision test for blue ball
@@ -238,13 +219,13 @@ while frame < TOTAL_FRAMES:
             score_blue += 1
             rings_passed = True
             passed_ring_index = i
-            # Add blue shockwave
+            # Add shockwave effect for blue ball
             shockwaves.append({
-                'color': BLUE,
-                'pos': ball2.pos.copy(),
-                'radius': 0,
-                'max_radius': 260,
-                'alpha': 180
+                'center': ring_center.copy(),
+                'radius': actual_radius,
+                'max_radius': actual_radius + 300,
+                'alpha': 255,
+                'color': BLUE
             })
 
     # If a ring was passed, adjust the target offsets for all active rings
@@ -280,6 +261,23 @@ while frame < TOTAL_FRAMES:
         overlap = min_dist - dist
         ball.pos -= n * (overlap / 2)
         ball2.pos += n * (overlap / 2)
+
+    # Draw shockwave effects
+    for sw in shockwaves[:]:
+        sw['radius'] += 12  # Speed of expansion
+        sw['alpha'] = max(0, sw['alpha'] - 12)  # Fade out
+        if sw['radius'] > sw['max_radius'] or sw['alpha'] <= 0:
+            shockwaves.remove(sw)
+            continue
+        surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        pygame.draw.circle(
+            surf,
+            sw['color'] + (int(sw['alpha']),),
+            (int(sw['center'].x), int(sw['center'].y)),
+            int(sw['radius']),
+            8
+        )
+        screen.blit(surf, (0, 0))
 
     # Draw both balls
     ball.draw(screen, RED)
