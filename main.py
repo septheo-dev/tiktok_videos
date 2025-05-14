@@ -1,33 +1,168 @@
+#region Imports
 import pygame
 import sys
 import math
 import random
 import bisect
+import pygame.mixer
+import mido
+import os
+import tempfile
+import subprocess
+import pygame.midi
+from tqdm import tqdm 
+import pygame.mixer
+from pydub import AudioSegment
+#endregion
 
+
+#region Constantes et configuration
 # 1080x1920 vertical for high quality export
 WIDTH, HEIGHT = 540, 960
 FPS = 60
 GRAVITY = 0.3
 TOTAL_FRAMES = 3660  # ~61 seconds at 60 fps
-
-# --- Optimized: Export frames for video ---
-import os
-import tempfile
-import subprocess
-
+NOTE_COOLDOWN = 200  # ms mini entre deux notes
+NOTE_DURATION = 150  # ms de durée de chaque note
+MAX_NOTES = None     # None = on boucle la playlist entière
 RECORDING = True  # Set to True to export video frames
 TEMP_FRAMES_DIR = tempfile.mkdtemp(prefix='game_frames_')
 FRAME_PREFIX = os.path.join(TEMP_FRAMES_DIR, 'frame_')
+MIDI_CHANNEL = 0  # For background music
+COLLISION_CHANNEL = 1  # For collision effects
+#endregion
 
+
+
+
+#region Parsing MIDI en liste de notes
+# --- 1) PARSING DU MIDI EN LISTE DE NOTES ---
+# On charge seulement les messages note_on dont velocity>0
+mid = mido.MidiFile('music.mid')
+note_sequence = []
+for track in mid.tracks:
+    for msg in track:
+        if msg.type == 'note_on' and msg.velocity > 0:
+            note_sequence.append(msg.note)
+if not note_sequence:
+    raise RuntimeError("Aucune note détectée dans music.mid")
+if MAX_NOTES:
+    note_sequence = note_sequence[:MAX_NOTES]
+#endregion
+
+
+#region Couleurs
 # Colors
 def rgb(r, g, b): return (r, g, b)
 BLACK = rgb(0, 0, 0)
 RED   = rgb(255, 50, 50)
 WHITE = rgb(255, 255, 255)
 GREEN = rgb(0,255,0)
+#endregion
 
+
+#region Initialisation Pygame/MIDI
 pygame.init()
+pygame.midi.init()
+#endregion
+
+
+#region Setup MIDI Output
+# --- Robust MIDI Output Setup ---
+output_id = None
+for i in range(pygame.midi.get_count()):
+    interf, name, is_input, is_output, opened = pygame.midi.get_device_info(i)
+    if is_output and not opened:
+        output_id = i
+        break
+
+try:
+    if output_id is None:
+        print("⚠️ No physical MIDI device found. Using virtual MIDI...")
+        try:
+            midi_out = pygame.midi.Output(pygame.midi.get_default_output_id())
+        except Exception:
+            print("❌ Install a virtual MIDI driver:")
+            print("- Mac: Enable IAC Driver in Audio MIDI Setup")
+            print("- Windows: Use loopMIDI")
+            print("- Linux: Use aconnect")
+            pygame.midi.quit()
+            pygame.quit()
+            sys.exit(1)
+    else:
+        midi_out = pygame.midi.Output(output_id)
+except Exception as e:
+    print(f"❌ MIDI output error: {e}")
+    pygame.midi.quit()
+    pygame.quit()
+    sys.exit(1)
+#endregion
+
+
+
+#region Classe MIDIPlayer
+# --- MIDI Timeline Player ---
+class MIDIPlayer:
+    def __init__(self, midi_file):
+        self.midi_file = mido.MidiFile(midi_file)
+        self.start_time = 0
+        self.events = []
+        # Convert MIDI messages to timed events
+        current_time = 0
+        for msg in self.midi_file:
+            current_time += msg.time
+            if msg.type == 'note_on' and msg.velocity > 0:
+                self.events.append((current_time, msg))
+        self.events.sort(key=lambda x: x[0])
+        self.current_event = 0
+
+    def start(self):
+        self.start_time = pygame.time.get_ticks()
+        self.current_event = 0
+
+    def update(self):
+        if self.current_event >= len(self.events):
+            return
+        elapsed = (pygame.time.get_ticks() - self.start_time) / 1000
+        while self.current_event < len(self.events) and self.events[self.current_event][0] <= elapsed:
+            msg = self.events[self.current_event][1]
+            midi_out.note_on(msg.note, velocity=msg.velocity, channel=MIDI_CHANNEL)
+            # Schedule note off
+            pygame.time.set_timer(pygame.USEREVENT + self.current_event, int(msg.time * 1000), 1)
+            self.current_event += 1
+#endregion
+
+
+#region Initialisation Audio et MIDIPlayer
+# Initialize MIDIPlayer before game loop
+midi_player = MIDIPlayer('music.mid')
+midi_player.start()
+yeah_sound = pygame.mixer.Sound('yeah.mp3')
+#endregion
+
+
+
+
+#region Fonctions utilitaires audio
+# --- Collision sound effect function ---
+def play_collision_sound(event_type):
+    # event_type: 'ball-ball' or 'ring'
+    if event_type == 'ball-ball':
+        midi_out.note_on(60, velocity=100, channel=COLLISION_CHANNEL)  # Low pitch
+        pygame.time.set_timer(pygame.USEREVENT + 999, 100, 1)  # Short note
+
+    elif event_type == 'ring':
+        midi_out.note_on(72, velocity=100, channel=COLLISION_CHANNEL)  # Higher pitch
+        pygame.time.set_timer(pygame.USEREVENT + 998, 100, 1)  # Short note
+
+    elif event_type == 'yeah':
+        yeah_sound.stop()  # Cut previous sound if playing
+        yeah_sound.play()
+#endregion
+
+
 # Hide window for fast export (headless mode)
+#region Initialisation écran, polices, variables de score
 os.environ['SDL_VIDEODRIVER'] = 'dummy'
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
@@ -38,9 +173,11 @@ font = pygame.font.SysFont('Arial', 48)
 score_red = 0
 score_blue = 0
 
-
 passed_indices = []
+#endregion
 
+
+#region Classe Ball
 class Ball:
     def __init__(self, x, y, radius, speed=6):
         self.pos = pygame.Vector2(x, y)
@@ -114,7 +251,11 @@ class Ball:
             else:
                 return 'pass'
         return None
+#endregion
 
+
+
+#region Initialisation des objets de jeu
 # Initialize balls in the center and slightly offset
 ball = Ball(WIDTH//2, HEIGHT//2, radius=20)
 ball2 = Ball(WIDTH//2 + 60, HEIGHT//2, radius=20)
@@ -149,14 +290,29 @@ for i in range(NUM_TOTAL_RINGS):
         'target_offset': 0,            # Target radius offset for smooth animation
         'active': True                 # Flag to track if ring is active
     })
+#endregion
 
+#region Boucle principale d'animation
 # Main animation loop
 frame = 0
 while frame < TOTAL_FRAMES:
+    midi_player.update()  # Play background music according to MIDI timeline
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+
+        # Handle note_off for MIDIPlayer scheduled events
+        if event.type >= pygame.USEREVENT and event.type < pygame.USEREVENT + 900:
+            event_idx = event.type - pygame.USEREVENT
+            if event_idx < len(midi_player.events):
+                msg = midi_player.events[event_idx][1]
+                midi_out.note_off(msg.note, velocity=0, channel=MIDI_CHANNEL)
+        # Handle note_off for collision effects
+        if event.type == pygame.USEREVENT + 998:
+            midi_out.note_off(72, velocity=0, channel=COLLISION_CHANNEL)
+        if event.type == pygame.USEREVENT + 999:
+            midi_out.note_off(60, velocity=0, channel=COLLISION_CHANNEL)
 
     screen.fill(BLACK)
 
@@ -351,11 +507,26 @@ while frame < TOTAL_FRAMES:
             bar = '=' * filled_len + '-' * (bar_len - filled_len)
             print(f"\r[Export] |{bar}| {percent}% ({frame}/{TOTAL_FRAMES})", end='', flush=True)
     # Skip display.flip() and clock.tick(FPS) for speed
+    #clock.tick(FPS)
     frame += 1
+    #actual_fps = clock.get_fps()
+    #if actual_fps > FPS * 1.1:  # If running too fast
+    #    time.sleep(0.001)  # Prevent 100% CPU usage
+#endregion
 
+#region Nettoyage et post-processing
+# Nettoyage
+# Cleanup all notes before quitting
+for ch in range(16):
+    try:
+        midi_out.note_off_all(channel=ch)
+    except Exception:
+        pass
+midi_out.close()
+pygame.midi.quit()
 pygame.quit()
 
-# --- Compress frames to video and clean up ---
+# Updated video compression command
 def compress_frames_to_video():
     ffmpeg_cmd = [
         'ffmpeg',
@@ -380,3 +551,4 @@ def compress_frames_to_video():
 
 if RECORDING:
     compress_frames_to_video()
+#endregion
