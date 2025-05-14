@@ -5,14 +5,14 @@ import math
 import random
 import bisect
 import pygame.mixer
-import mido
 import os
 import tempfile
 import subprocess
-import pygame.midi
 from tqdm import tqdm 
 import pygame.mixer
 from pydub import AudioSegment
+from pydub import AudioSegment
+
 #endregion
 
 
@@ -35,20 +35,6 @@ COLLISION_CHANNEL = 1  # For collision effects
 
 
 
-#region Parsing MIDI en liste de notes
-# --- 1) PARSING DU MIDI EN LISTE DE NOTES ---
-# On charge seulement les messages note_on dont velocity>0
-mid = mido.MidiFile('music.mid')
-note_sequence = []
-for track in mid.tracks:
-    for msg in track:
-        if msg.type == 'note_on' and msg.velocity > 0:
-            note_sequence.append(msg.note)
-if not note_sequence:
-    raise RuntimeError("Aucune note détectée dans music.mid")
-if MAX_NOTES:
-    note_sequence = note_sequence[:MAX_NOTES]
-#endregion
 
 
 #region Couleurs
@@ -61,115 +47,14 @@ GREEN = rgb(0,255,0)
 #endregion
 
 
-#region Initialisation Pygame/MIDI
 pygame.init()
-pygame.midi.init()
-#endregion
-
-
-#region Setup MIDI Output
-# --- Robust MIDI Output Setup ---
-output_id = None
-for i in range(pygame.midi.get_count()):
-    interf, name, is_input, is_output, opened = pygame.midi.get_device_info(i)
-    if is_output and not opened:
-        output_id = i
-        break
-
-try:
-    if output_id is None:
-        print("⚠️ No physical MIDI device found. Using virtual MIDI...")
-        try:
-            midi_out = pygame.midi.Output(pygame.midi.get_default_output_id())
-        except Exception:
-            print("❌ Install a virtual MIDI driver:")
-            print("- Mac: Enable IAC Driver in Audio MIDI Setup")
-            print("- Windows: Use loopMIDI")
-            print("- Linux: Use aconnect")
-            pygame.midi.quit()
-            pygame.quit()
-            sys.exit(1)
-    else:
-        midi_out = pygame.midi.Output(output_id)
-except Exception as e:
-    print(f"❌ MIDI output error: {e}")
-    pygame.midi.quit()
-    pygame.quit()
-    sys.exit(1)
-#endregion
-
-
-
-#region Classe MIDIPlayer
-# --- MIDI Timeline Player ---
-class MIDIPlayer:
-    def __init__(self, midi_file):
-        self.midi_file = mido.MidiFile(midi_file)
-        self.start_time = 0
-        self.events = []
-        # Convert MIDI messages to timed events
-        current_time = 0
-        for msg in self.midi_file:
-            current_time += msg.time
-            if msg.type == 'note_on' and msg.velocity > 0:
-                self.events.append((current_time, msg))
-        self.events.sort(key=lambda x: x[0])
-        self.current_event = 0
-
-    def start(self):
-        self.start_time = pygame.time.get_ticks()
-        self.current_event = 0
-
-    def update(self):
-        if self.current_event >= len(self.events):
-            return
-        elapsed = (pygame.time.get_ticks() - self.start_time) / 1000
-        while self.current_event < len(self.events) and self.events[self.current_event][0] <= elapsed:
-            msg = self.events[self.current_event][1]
-            midi_out.note_on(msg.note, velocity=msg.velocity, channel=MIDI_CHANNEL)
-            # Schedule note off
-            pygame.time.set_timer(pygame.USEREVENT + self.current_event, int(msg.time * 1000), 1)
-            self.current_event += 1
-#endregion
-
-
-#region Initialisation Audio et MIDIPlayer
-# Initialize MIDIPlayer before game loop
-midi_player = MIDIPlayer('music.mid')
-midi_player.start()
-yeah_sound = pygame.mixer.Sound('yeah.mp3')
-yeah_events = []
-#endregion
-
-
-
-
-#region Fonctions utilitaires audio
-# --- Collision sound effect function ---
-def play_collision_sound(event_type):
-    # event_type: 'ball-ball' or 'ring'
-    if event_type == 'ball-ball':
-        midi_out.note_on(60, velocity=100, channel=COLLISION_CHANNEL)  # Low pitch
-        pygame.time.set_timer(pygame.USEREVENT + 999, 100, 1)  # Short note
-
-    elif event_type == 'ring':
-        midi_out.note_on(72, velocity=100, channel=COLLISION_CHANNEL)  # Higher pitch
-        pygame.time.set_timer(pygame.USEREVENT + 998, 100, 1)  # Short note
-
-    elif event_type == 'yeah':
-        yeah_sound.stop()  # Cut previous sound if playing
-        yeah_sound.play()
-#endregion
-
-
-
-
 
 # Hide window for fast export (headless mode)
 #region Initialisation écran, polices, variables de score
 os.environ['SDL_VIDEODRIVER'] = 'dummy'
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
+yeah_events = []
 # Font for score
 font = pygame.font.SysFont('Arial', 48)
 
@@ -207,7 +92,7 @@ class Ball:
             if color == RED:
                 trail_color = (255, 120, 120)
             else:
-                trail_color = (120, 180, 255)
+                trail_color = (0,255,0)
             trail_surf = pygame.Surface((trail_radius*2, trail_radius*2), pygame.SRCALPHA)
             pygame.draw.circle(trail_surf, trail_color + (alpha//2,), (trail_radius, trail_radius), trail_radius)
             surface.blit(trail_surf, (p.x - trail_radius, p.y - trail_radius), special_flags=pygame.BLEND_PREMULTIPLIED)
@@ -300,23 +185,10 @@ for i in range(NUM_TOTAL_RINGS):
 # Main animation loop
 frame = 0
 while frame < TOTAL_FRAMES:
-    midi_player.update()  # Play background music according to MIDI timeline
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
-
-        # Handle note_off for MIDIPlayer scheduled events
-        if event.type >= pygame.USEREVENT and event.type < pygame.USEREVENT + 900:
-            event_idx = event.type - pygame.USEREVENT
-            if event_idx < len(midi_player.events):
-                msg = midi_player.events[event_idx][1]
-                midi_out.note_off(msg.note, velocity=0, channel=MIDI_CHANNEL)
-        # Handle note_off for collision effects
-        if event.type == pygame.USEREVENT + 998:
-            midi_out.note_off(72, velocity=0, channel=COLLISION_CHANNEL)
-        if event.type == pygame.USEREVENT + 999:
-            midi_out.note_off(60, velocity=0, channel=COLLISION_CHANNEL)
 
     screen.fill(BLACK)
 
@@ -480,17 +352,17 @@ while frame < TOTAL_FRAMES:
     no_text = f"No : {score_blue}"
     yes_surf = score_font.render(yes_text, True, (0,255,0))
     no_surf = score_font.render(no_text, True, (255,60,60))
-    box_padding = 12
-    box_gap = 30
-    box_y = title_bg_rect.bottom + 8
-    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 8)
-    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 8)
-    pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=8)
-    pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=8)
-    pygame.draw.rect(screen, (0,255,0), yes_bg_rect, 2, border_radius=8)
-    pygame.draw.rect(screen, (255,60,60), no_bg_rect, 2, border_radius=8)
-    screen.blit(yes_surf, (yes_bg_rect.x + box_padding, yes_bg_rect.y + 6))
-    screen.blit(no_surf, (no_bg_rect.x + box_padding, no_bg_rect.y + 6))
+    box_padding = 24  # Augmenté
+    box_gap = 50     # Augmenté
+    box_y = title_bg_rect.bottom + 18  # Plus d'espace sous le titre
+    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 28)
+    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 28)
+    pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=14)
+    pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=14)
+    pygame.draw.rect(screen, (0,255,0), yes_bg_rect, 3, border_radius=14)
+    pygame.draw.rect(screen, (255,60,60), no_bg_rect, 3, border_radius=14)
+    screen.blit(yes_surf, (yes_bg_rect.x + box_padding, yes_bg_rect.y + 14))
+    screen.blit(no_surf, (no_bg_rect.x + box_padding, no_bg_rect.y + 14))
 
     # Clock (bottom center, lifted higher)
     seconds_left = max(0, (TOTAL_FRAMES - frame)//FPS)
@@ -498,9 +370,9 @@ while frame < TOTAL_FRAMES:
     secs = seconds_left % 60
     clock_str = f"{mins:02}:{secs:02}"
     clock_surf = clock_font.render(clock_str, True, (0,0,0))
-    clock_bg_rect = pygame.Rect(WIDTH//2 - clock_surf.get_width()//2 - 14, HEIGHT - clock_surf.get_height() - 80, clock_surf.get_width() + 28, clock_surf.get_height() + 12)
-    pygame.draw.rect(screen, (255,255,255), clock_bg_rect, border_radius=7)
-    screen.blit(clock_surf, (clock_bg_rect.x + 14, clock_bg_rect.y + 6))
+    clock_bg_rect = pygame.Rect(WIDTH//2 - clock_surf.get_width()//2 - 24, HEIGHT - clock_surf.get_height() - 120, clock_surf.get_width() + 48, clock_surf.get_height() + 28)
+    pygame.draw.rect(screen, (255,255,255), clock_bg_rect, border_radius=14)
+    screen.blit(clock_surf, (clock_bg_rect.x + 24, clock_bg_rect.y + 14))
 
     # --- Export frame as PNG if enabled ---
     if RECORDING:
@@ -512,58 +384,53 @@ while frame < TOTAL_FRAMES:
             filled_len = int(bar_len * percent // 100)
             bar = '=' * filled_len + '-' * (bar_len - filled_len)
             print(f"\r[Export] |{bar}| {percent}% ({frame}/{TOTAL_FRAMES})", end='', flush=True)
-    # Skip display.flip() and clock.tick(FPS) for speed
-    #clock.tick(FPS)
     frame += 1
-    #actual_fps = clock.get_fps()
-    #if actual_fps > FPS * 1.1:  # If running too fast
-    #    time.sleep(0.001)  # Prevent 100% CPU usage
+
+pygame.quit()
 #endregion
 
-#region Nettoyage et post-processing
-# Nettoyage
-# Cleanup all notes before quitting
-for ch in range(16):
-    try:
-        midi_out.note_off_all(channel=ch)
-    except Exception:
-        pass
-midi_out.close()
-pygame.midi.quit()
-pygame.quit()
+
 
 #create text audio yeah file
-from pydub import AudioSegment
+
+def create_next_output_folder():
+    """
+    Crée un dossier 'output/video_N' où N est le prochain numéro disponible.
+    Retourne le chemin du dossier créé.
+    """
+    output_dir = 'output'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    n = 1
+    while True:
+        candidate = os.path.join(output_dir, f"video_{n}")
+        if not os.path.exists(candidate):
+            os.makedirs(candidate)
+            return candidate
+        n += 1
+
+# --- Choix du dossier de sortie ---
+output_folder = create_next_output_folder()
 
 
-def create_audio(yeah_events):
-    # Load the base sound
-    yeah_sound = AudioSegment.from_file("yeah.mp3")
-
-    # Parameters
+def create_audio(yeah_events, output_folder):
+    yeah_sound = AudioSegment.from_file("output/yeah.mp3")
     FPS = 60  # Frames per second
     frame_duration_ms = 1000 / FPS  # Duration of one frame in ms
-
-    # Calculate total duration needed
     total_duration_ms = (max(yeah_events) + 1) * frame_duration_ms
-
-    # Start with silent audio segment
     output_audio = AudioSegment.silent(duration=total_duration_ms)
-
-    # Overlay 'yeah' sound at specified event times
     for frame in yeah_events:
         time_ms = frame * frame_duration_ms
         output_audio = output_audio.overlay(yeah_sound, position=int(time_ms))
+    wav_path = os.path.join(output_folder, "output.wav")
+    output_audio.export(wav_path, format="wav")
+    print(f"{wav_path} created successfully!")
 
-    # Export final audio to WAV file
-    output_audio.export("output.wav", format="wav")
-
-    print("output.wav created successfully!")
-
-create_audio(yeah_events)
+create_audio(yeah_events, output_folder)
 
 # Updated video compression command
-def compress_frames_to_video():
+def compress_frames_to_video(output_folder):
+    mp4_path = os.path.join(output_folder, "game_recording.mp4")
     ffmpeg_cmd = [
         'ffmpeg',
         '-y',  # overwrite without asking
@@ -575,35 +442,37 @@ def compress_frames_to_video():
         '-preset', 'fast',
         '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart',
-        'game_recording_compressed.mp4'
+        mp4_path
     ]
     print("\n[FFmpeg] Compressing frames into video... (this may take a minute)")
     subprocess.run(ffmpeg_cmd)
-    # Clean up temporary frames
     for f in os.listdir(TEMP_FRAMES_DIR):
         os.remove(os.path.join(TEMP_FRAMES_DIR, f))
     os.rmdir(TEMP_FRAMES_DIR)
-    print("[FFmpeg] Done! Output: game_recording_compressed.mp4")
+    print(f"[FFmpeg] Done! Output: {mp4_path}")
 
 if RECORDING:
-    compress_frames_to_video()
+    compress_frames_to_video(output_folder)
 
 
-def compile_audio_video():
+def compile_audio_video(output_folder):
+    wav_path = os.path.join(output_folder, "output.wav")
+    mp4_path = os.path.join(output_folder, "game_recording.mp4")
+    final_path = os.path.join(output_folder, "game_recording_final.mp4")
     ffmpeg_cmd = [
         'ffmpeg',
         '-y',  # overwrite without asking
-        '-i', 'output.wav',
-        '-i', 'game_recording_compressed.mp4',
+        '-i', wav_path,
+        '-i', mp4_path,
         '-c:v', 'copy',
         '-c:a', 'aac',
         '-map', '0:a',
         '-map', '1:v',
-        'game_recording.mp4'
+        final_path
     ]
     print("\n[FFmpeg] Compiling audio and video... (this may take a minute)")
     subprocess.run(ffmpeg_cmd)
-    print("[FFmpeg] Done! Output: game_recording.mp4")
+    print(f"[FFmpeg] Done! Output: {final_path}")
 
-compile_audio_video()
+compile_audio_video(output_folder)
 #endregion
