@@ -138,6 +138,7 @@ class MIDIPlayer:
 midi_player = MIDIPlayer('music.mid')
 midi_player.start()
 yeah_sound = pygame.mixer.Sound('yeah.mp3')
+yeah_events = []
 #endregion
 
 
@@ -159,6 +160,9 @@ def play_collision_sound(event_type):
         yeah_sound.stop()  # Cut previous sound if playing
         yeah_sound.play()
 #endregion
+
+
+
 
 
 # Hide window for fast export (headless mode)
@@ -371,6 +375,7 @@ while frame < TOTAL_FRAMES:
                 ring['active'] = False
                 score_red += 1
                 rings_passed = True
+                yeah_events.append(frame)
                 # Add to passed_indices (sorted)
                 idx = ring['initial_index']
                 if idx not in passed_indices:  # Prevent duplicates
@@ -392,6 +397,7 @@ while frame < TOTAL_FRAMES:
                 ring['active'] = False
                 score_blue += 1
                 rings_passed = True
+                yeah_events.append(frame)
                 # Add to passed_indices (sorted)
                 idx = ring['initial_index']
                 if idx not in passed_indices:  # Prevent duplicates
@@ -526,6 +532,36 @@ midi_out.close()
 pygame.midi.quit()
 pygame.quit()
 
+#create text audio yeah file
+from pydub import AudioSegment
+
+
+def create_audio(yeah_events):
+    # Load the base sound
+    yeah_sound = AudioSegment.from_file("yeah.mp3")
+
+    # Parameters
+    FPS = 60  # Frames per second
+    frame_duration_ms = 1000 / FPS  # Duration of one frame in ms
+
+    # Calculate total duration needed
+    total_duration_ms = (max(yeah_events) + 1) * frame_duration_ms
+
+    # Start with silent audio segment
+    output_audio = AudioSegment.silent(duration=total_duration_ms)
+
+    # Overlay 'yeah' sound at specified event times
+    for frame in yeah_events:
+        time_ms = frame * frame_duration_ms
+        output_audio = output_audio.overlay(yeah_sound, position=int(time_ms))
+
+    # Export final audio to WAV file
+    output_audio.export("output.wav", format="wav")
+
+    print("output.wav created successfully!")
+
+create_audio(yeah_events)
+
 # Updated video compression command
 def compress_frames_to_video():
     ffmpeg_cmd = [
@@ -551,4 +587,23 @@ def compress_frames_to_video():
 
 if RECORDING:
     compress_frames_to_video()
+
+
+def compile_audio_video():
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-y',  # overwrite without asking
+        '-i', 'output.wav',
+        '-i', 'game_recording_compressed.mp4',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-map', '0:a',
+        '-map', '1:v',
+        'game_recording.mp4'
+    ]
+    print("\n[FFmpeg] Compiling audio and video... (this may take a minute)")
+    subprocess.run(ffmpeg_cmd)
+    print("[FFmpeg] Done! Output: game_recording.mp4")
+
+compile_audio_video()
 #endregion
