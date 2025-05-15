@@ -350,19 +350,20 @@ while frame < TOTAL_FRAMES:
     # Score Table - two independent boxes
     yes_text = f"Yes : {score_red}"
     no_text = f"No : {score_blue}"
-    yes_surf = score_font.render(yes_text, True, (0,255,0))
-    no_surf = score_font.render(no_text, True, (255,60,60))
-    box_padding = 24  # Augmenté
-    box_gap = 50     # Augmenté
-    box_y = title_bg_rect.bottom + 18  # Plus d'espace sous le titre
-    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 28)
-    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 28)
-    pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=14)
-    pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=14)
-    pygame.draw.rect(screen, (0,255,0), yes_bg_rect, 3, border_radius=14)
-    pygame.draw.rect(screen, (255,60,60), no_bg_rect, 3, border_radius=14)
-    screen.blit(yes_surf, (yes_bg_rect.x + box_padding, yes_bg_rect.y + 14))
-    screen.blit(no_surf, (no_bg_rect.x + box_padding, no_bg_rect.y + 14))
+    score_font_big = pygame.font.SysFont('Arial', 38, bold=True)
+    yes_surf = score_font_big.render(yes_text, True, (255,60,60))  # Yes devient rouge
+    no_surf = score_font_big.render(no_text, True, (0,255,0))      # No devient vert
+    box_padding = 38
+    box_gap = 60
+    box_y = title_bg_rect.bottom + 18
+    yes_bg_rect = pygame.Rect(WIDTH//2 - yes_surf.get_width() - box_gap//2 - box_padding, box_y, yes_surf.get_width() + 2*box_padding, yes_surf.get_height() + 38)
+    no_bg_rect = pygame.Rect(WIDTH//2 + box_gap//2, box_y, no_surf.get_width() + 2*box_padding, no_surf.get_height() + 38)
+    pygame.draw.rect(screen, (255,255,255), yes_bg_rect, border_radius=18)
+    pygame.draw.rect(screen, (255,255,255), no_bg_rect, border_radius=18)
+    pygame.draw.rect(screen, (255,60,60), yes_bg_rect, 4, border_radius=18)  # Yes bordure rouge
+    pygame.draw.rect(screen, (0,255,0), no_bg_rect, 4, border_radius=18)     # No bordure verte
+    screen.blit(yes_surf, (yes_bg_rect.x + box_padding, yes_bg_rect.y + 18))
+    screen.blit(no_surf, (no_bg_rect.x + box_padding, no_bg_rect.y + 18))
 
     # Clock (bottom center, lifted higher)
     seconds_left = max(0, (TOTAL_FRAMES - frame)//FPS)
